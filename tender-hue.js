@@ -447,9 +447,9 @@ const CAMERA_PATCHES = {
   x100:    { sensor: 4, color: 1, tonality: 2, optics: 1, form: 1 },
   x10:     { sensor: 3, color: 1, tonality: 1, optics: 0, form: 1 },
   xpro1:   { sensor: 5, color: 3, tonality: 2, optics: 2, form: 2 },
-  x20:     { sensor: 5, color: 3, tonality: 0, optics: 0, form: 2 },
+  x20:     { sensor: 5, color: 3, tonality: 2, optics: 0, form: 2 },
   xt1:     { sensor: 5, color: 3, tonality: 2, optics: 2, form: 2 },
-  x70:     { sensor: 5, color: 2, tonality: 0, optics: 1, form: 2 },
+  x70:     { sensor: 5, color: 2, tonality: 2, optics: 1, form: 2 },
   x100vi:  { sensor: 5, color: 3, tonality: 2, optics: 1, form: 3 },
 };
 
@@ -458,14 +458,14 @@ const CAMERA_PATCHES = {
 // あくまで「遺伝子は同じでも個体ごとに少しクセがある」という体裁の微補正で、
 // MICRO ADJUST側の値（表示・操作対象）に直接足し込む
 const PATCH_QUIRKS = {
-  f601:    { sharpness: 6,  grain: 6 },                    // 3.1MPの初期機：ノイズが多く、シャープも強め
-  f700:    { contrast: 8,   highlight: -8 },               // SRの「4倍DR」を謳うが、実写ではトーンカーブが硬い
+  f601:    { saturation: -12, sharpness: 14, grain: 6 },   // 3.1MPの初期機：彩度は良好だが盛りすぎず、カメラ内シャープ処理が目立ち、ノイズも多め
+  f700:    { contrast: 8,   highlight: -8, grain: 10 },    // SRの「4倍DR」を謳うが、実写ではトーンカーブが硬く、ノイズも多い
   f31fd:   { grain: -10,    sharpness: -4 },               // 高感度・低ノイズで滑らか
   s5pro:   { highlight: 6,  saturation: 4 },               // 肌色・階調の評価が高いプロ機
   f200exr: { highlight: 8,  sharpness: -6 },               // DR優先モードの広いハイライト、解像感はやや控えめ
-  x100:    { sharpness: 3 },                               // Bayer配列の素直な描き
+  x100:    { sharpness: -12 },                             // Bayer配列の素直な描き。f/2開放では柔らかく、周辺もぼやける
   x10:     { grain: 2,      highlight: 4 },                // 2/3型EXR CMOS
-  xpro1:   { saturation: 4, sharpness: -2 },               // X-Trans初代：色が濃く、やや柔らかい
+  xpro1:   { saturation: 4, sharpness: -6 },               // X-Trans初代：色が濃く、やや柔らかい
   x20:     { sharpness: 4 },                               // 小型X-Trans
   xt1:     { contrast: 4,   sharpness: 4 },                // X-Pro1と同じ遺伝子：よりカリッとした描き
   x70:     { sharpness: 5 },                               // 28mm単焦点のキレ
