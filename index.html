@@ -124,6 +124,7 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 /* 遺伝子ボタン選択（離散的な切り替えであることを明示） */
 .axis-btn-grid { display: flex; flex-wrap: wrap; gap: 6px; }
 .axis-btn { flex: 1; min-width: 76px; padding: 9px 6px; border: 1px solid var(--line-strong); background: transparent; color: var(--ink); font: 600 9px/1.2 var(--sans); letter-spacing: 0.02em; text-align: center; cursor: pointer; transition: all 0.12s; }
+.axis-btn-grid[data-axis="optics"] .axis-btn:last-child { flex-basis: 100%; } /* 長いラベル（INTERCHANGEABLE）は1行まるごと使って、はみ出さないようにする */
 .axis-btn:hover { border-color: var(--accent); }
 .axis-btn.active { background: var(--accent); border-color: var(--accent); color: #241d16; }
 
