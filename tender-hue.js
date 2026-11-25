@@ -235,8 +235,11 @@ function pseudoRandom2D(x, y) {
   return v - Math.floor(v);
 }
 
-function processImage(imageData, params, fast) {
+// scale：基準解像度（画面用キャンバス＝最大幅900px）に対する横幅の比率（既定1）。
+//   高解像度での書き出し時に、ぼかし半径・粒子の大きさをこの比率に合わせることで、どの解像度でも同じ見た目になる。
+function processImage(imageData, params, fast, scale = 1) {
   const w = imageData.width, h = imageData.height;
+  const blurR = (r) => Math.max(1, Math.round(r * scale)); // boxBlurは整数半径のみ受け付ける
   const src = imageData.data;
   const out = new Uint8ClampedArray(src);
 
@@ -301,9 +304,10 @@ function processImage(imageData, params, fast) {
   // GRAIN（センサー/処理世代由来の粒状感）
   if (params.grain > 0) {
     const amt = params.grain / 100 * 34;
+    const gs = Math.max(1, scale); // 高解像度では粒子も同じ比率で大きくする
     for (let i = 0; i < out.length; i += 4) {
       const px = (i / 4) % w, py = Math.floor((i / 4) / w);
-      const n = (pseudoRandom2D(px, py) - 0.5) * amt;
+      const n = (pseudoRandom2D(Math.floor(px / gs), Math.floor(py / gs)) - 0.5) * amt;
       out[i] = clamp(out[i] + n, 0, 255);
       out[i + 1] = clamp(out[i + 1] + n, 0, 255);
       out[i + 2] = clamp(out[i + 2] + n, 0, 255);
@@ -312,7 +316,7 @@ function processImage(imageData, params, fast) {
 
   // SHARPNESS（アンシャープマスク：軽いボックスブラーとの差分を加算）
   if (!fast && params.sharpness !== 0) {
-    const blurred = boxBlur(out, w, h, 2);
+    const blurred = boxBlur(out, w, h, blurR(2));
     const amt = params.sharpness / 100;
     for (let i = 0; i < out.length; i += 4) {
       for (let c = 0; c < 3; c++) {
@@ -324,7 +328,7 @@ function processImage(imageData, params, fast) {
 
   // CORNER SOFT（安価なズームレンズの周辺の甘さ：四隅だけブレンドで柔らかく）
   if (!fast && params.cornerSoft > 0) {
-    const blurred = boxBlur(out, w, h, 4);
+    const blurred = boxBlur(out, w, h, blurR(4));
     for (let i = 0; i < out.length; i += 4) {
       const px = (i / 4) % w, py = Math.floor((i / 4) / w);
       const dist = Math.sqrt((px - cx) ** 2 + (py - cy) ** 2) / maxDist;
@@ -337,7 +341,7 @@ function processImage(imageData, params, fast) {
 
   // WARM GLOW（初期世代らしい、あたたかく柔らかいにじみ）
   if (!fast && params.warmGlow > 0) {
-    const blurred = boxBlur(out, w, h, 6);
+    const blurred = boxBlur(out, w, h, blurR(6));
     const amt = params.warmGlow / 100 * 0.35;
     for (let i = 0; i < out.length; i += 4) {
       out[i] = clamp(out[i] * (1 - amt) + (blurred[i] * 1.06) * amt, 0, 255);
@@ -349,8 +353,8 @@ function processImage(imageData, params, fast) {
   return new ImageData(out, w, h);
 }
 
-function applyTenderHue(fast) {
-  if (!originalImageData) return;
+// 現在の遺伝子・MICRO ADJUST・パッチ固有クイークから、描画用パラメータを組み立てる
+function buildParams() {
   const sel = currentSelection();
   const params = computeParams(sel);
   // MICRO ADJUST：手動で動かした4つはここで遺伝子由来の値を上書きする
@@ -361,6 +365,12 @@ function applyTenderHue(fast) {
   // パッチ固有の色温度・彩度クイーク（MICRO ADJUSTスライダーには出ない、見えない上乗せ）
   params.colorTemp = clamp(params.colorTemp + patchColorTempQuirk, 0, 100);
   params.saturation = clamp(params.saturation + patchSaturationQuirk, 0, 100);
+  return params;
+}
+
+function applyTenderHue(fast) {
+  if (!originalImageData) return;
+  const params = buildParams();
   const source = fast ? previewImageData : originalImageData;
   const result = processImage(source, params, fast);
 
@@ -552,33 +562,92 @@ themeBtns.forEach(btn => {
 });
 
 // ── ダウンロード
+// 高解像度での書き出し
+// 画面上のキャンバスは軽さのため最大幅900pxだが、保存時だけ元写真の解像度（長辺の上限あり）で
+// フィルターをかけ直す。スマホのメモリ対策として上限を設け、失敗したら小さいサイズで再試行する。
+const EXPORT_MAX_LONG_SIDE = 2400;
+const EXPORT_FALLBACK_LONG_SIDE = 1600;
+
+function renderExportCanvas(longSide) {
+  const nw = originalImage.naturalWidth || originalImage.width;
+  const nh = originalImage.naturalHeight || originalImage.height;
+  const s = Math.min(1, longSide / Math.max(nw, nh));
+  const ew = Math.max(1, Math.round(nw * s));
+  const eh = Math.max(1, Math.round(nh * s));
+  if (ew <= outputCanvas.width) return null; // 画面用と同じかそれ以下なら、今のキャンバスをそのまま保存
+
+  const c = document.createElement('canvas');
+  c.width = ew; c.height = eh;
+  const cctx = c.getContext('2d');
+  cctx.imageSmoothingEnabled = true;
+  cctx.imageSmoothingQuality = 'high';
+  cctx.drawImage(originalImage, 0, 0, ew, eh);
+  const base = cctx.getImageData(0, 0, ew, eh);
+  const result = processImage(base, buildParams(), false, ew / originalImageData.width);
+  cctx.putImageData(result, 0, 0);
+  return c;
+}
+
 downloadBtn.addEventListener('click', () => {
-  try {
-    const dataUrl = outputCanvas.toDataURL('image/png');
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    if (isIOS) {
-      showSaveOverlay(dataUrl);
-    } else {
-      const link = document.createElement('a');
-      link.download = 'tender-hue.png';
-      link.href = dataUrl;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+  if (!originalImage) return;
+  // バッジの文言・表示状態を保存して、書き出しが終わったら元に戻す
+  const prevBadgeText = canvasBadge.textContent;
+  const prevBadgeDisplay = canvasBadge.style.display;
+  canvasBadge.textContent = '高解像度で書き出し中… EXPORTING';
+  canvasBadge.style.display = 'block';
+  downloadBtn.disabled = true;
+
+  const finish = () => {
+    canvasBadge.textContent = prevBadgeText;
+    canvasBadge.style.display = prevBadgeDisplay;
+    downloadBtn.disabled = false;
+  };
+
+  // バッジを表示してから重い処理に入る
+  setTimeout(() => {
+    try {
+      let exportCanvas = null;
+      for (const size of [EXPORT_MAX_LONG_SIDE, EXPORT_FALLBACK_LONG_SIDE]) {
+        try { exportCanvas = renderExportCanvas(size); break; }
+        catch (err) { console.warn('書き出しサイズを下げて再試行します:', size, err); exportCanvas = null; }
+      }
+      const target = exportCanvas || outputCanvas;
+
+      target.toBlob((blob) => {
+        finish();
+        if (!blob) {
+          alert('画像の保存に失敗しました。ブラウザを再読み込みしてもう一度お試しください。');
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        if (isIOS) {
+          showSaveOverlay(url);
+        } else {
+          const link = document.createElement('a');
+          link.download = 'tender-hue.png';
+          link.href = url;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+        }
+      }, 'image/png');
+    } catch (err) {
+      console.error('PNG保存に失敗しました:', err);
+      finish();
+      alert('画像の保存に失敗しました。ブラウザを再読み込みしてもう一度お試しください。');
     }
-  } catch (err) {
-    console.error('PNG保存に失敗しました:', err);
-    alert('画像の保存に失敗しました。ブラウザを再読み込みしてもう一度お試しください。');
-  }
+  }, 30);
 });
 
-function showSaveOverlay(dataUrl) {
+function showSaveOverlay(imageUrl) {
   const overlay = document.createElement('div');
   overlay.style.cssText = `position: fixed; inset: 0; z-index: 9999; background: rgba(10,10,10,0.96);
     display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;`;
   const img = document.createElement('img');
-  img.src = dataUrl;
+  img.src = imageUrl;
   img.style.cssText = 'max-width: 100%; max-height: 75vh; border-radius: 2px;';
   const hint = document.createElement('p');
   hint.innerHTML = '画像を長押しして「写真に保存」を選んでください<br><span style="color:#888; font-size:11px;">Press and hold the image, then tap "Save to Photos"</span>';
@@ -586,7 +655,7 @@ function showSaveOverlay(dataUrl) {
   const closeBtn = document.createElement('button');
   closeBtn.textContent = '閉じる / Close';
   closeBtn.style.cssText = `margin-top: 20px; padding: 10px 24px; background: transparent; color: white; border: 1px solid #666; border-radius: 2px; font-family: sans-serif; font-size: 13px; cursor: pointer;`;
-  closeBtn.addEventListener('click', () => overlay.remove());
+  closeBtn.addEventListener('click', () => { overlay.remove(); if (imageUrl.startsWith('blob:')) URL.revokeObjectURL(imageUrl); });
   overlay.appendChild(img); overlay.appendChild(hint); overlay.appendChild(closeBtn);
   document.body.appendChild(overlay);
 }
